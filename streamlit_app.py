@@ -1,18 +1,15 @@
-import streamlit as st
+import os
+import openai
 import requests
-from transformers import GPT2Tokenizer, GPT2LMHeadModel, pipeline
+import streamlit as st
 
-# Load the GPT-2 tokenizer and model
-tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-model = GPT2LMHeadModel.from_pretrained('gpt2')
+# Use Streamlit's secrets management to fetch the API key securely
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Hugging Face pipeline for text generation
-generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
-
-# Function to query the OpenFDA API for drug information
-def query_openfda(drug_name):
+# Function to query the OpenFDA API for drug information based on the user's query
+def query_openfda(query):
     base_url = 'https://api.fda.gov/drug/label.json'
-    params = {'search': f'openfda.brand_name:{drug_name}', 'limit': 1}
+    params = {'search': f'openfda.brand_name:{query}', 'limit': 1}
     response = requests.get(base_url, params=params)
     if response.status_code == 200:
         return response.json()
@@ -35,42 +32,56 @@ def extract_relevant_info(drug_json):
         st.warning(f"Some fields are missing: {e}")
     return drug_info
 
+# Function to generate response using GPT-3.5
+def generate_gpt3_response(prompt):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # Use GPT-3.5 Turbo model
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,  # Limit the response length
+            temperature=0.7  # Adjust temperature for more controlled, factual output
+        )
+        return response['choices'][0]['message']['content']
+    except Exception as e:
+        st.error(f"Error generating response: {str(e)}")
+        return None
+
 # Streamlit UI
 st.title("Clinical Drug Information and Query Response Generator")
 
-# Input field for clinicians to enter drug name
-drug_name = st.text_input("Enter the Drug Name:", "")
-
-# Input field for clinicians to ask a question
-user_prompt = st.text_area("Enter your clinical question:", "")
+# Input field for clinicians to ask a question, including drug name
+user_prompt = st.text_area("Enter your clinical question (include the drug name):", "")
 
 if st.button("Search and Generate Response"):
-    # Query the OpenFDA API and retrieve drug data
+    # Extract the drug name from the user's query (assuming first word as drug name)
+    drug_name = user_prompt.split()[0]  # Assuming the drug name is the first word of the prompt
     fda_data = query_openfda(drug_name)
+
     if fda_data:
         # Extract drug information
         drug_info = extract_relevant_info(fda_data)
         st.write("Drug Information:")
         st.json(drug_info)
         
-        # Generate a professional answer based on user input and FDA data
+        # Create the prompt based on user question and FDA data
         prompt = f"""
-        You are a clinician who is looking for detailed, professional information about {drug_name}. 
-        Based on the following data, generate a professional, fact-based response:
+        You are a clinician looking for detailed, professional information about {drug_name}. 
+        Based on the following data, generate a relevant, professional and fact-based response:
         
         Drug Information:
         Brand Name: {drug_info.get('Brand Name', 'unknown')}
         Generic Name: {drug_info.get('Generic Name', 'unknown')}
         Indications: {drug_info.get('Indications', 'unknown')}
-        Warnings: {drug_info.get('Warnings', 'unknown')}
         Dosage: {drug_info.get('Dosage', 'unknown')}
         
         Question: {user_prompt}
         
-        Please respond in a professional tone and provide factual information.
+        Respond in a sarcastic tone and provide factual information.
+        #change the tone to your liking
         """
         
-        # Generate a response based on the user prompt and drug information
-        generated_response = generator(prompt, max_length=200, num_return_sequences=1)
-        st.write("Generated Response:")
-        st.write(generated_response[0]['generated_text'])
+        # Generate a response using GPT-3.5
+        generated_response = generate_gpt3_response(prompt)
+        if generated_response:
+            st.write("Generated Response:")
+            st.write(generated_response)
