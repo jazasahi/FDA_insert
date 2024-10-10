@@ -7,14 +7,19 @@ import streamlit as st
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # Function to query the OpenFDA API for drug information based on the user's query
-def query_openfda(query):
-    base_url = 'https://api.fda.gov/drug/label.json'
-    params = {'search': f'openfda.brand_name:{query}', 'limit': 1}
-    response = requests.get(base_url, params=params)
+def get_drug_data(drug_name):
+    url = f"https://api.fda.gov/drug/label.json?search=openfda.brand_name:{drug_name}&limit=1"
+    response = requests.get(url)
+
     if response.status_code == 200:
-        return response.json()
+        data = response.json()
+        if "results" in data:
+            return data["results"][0]  # Return the first result
+        else:
+            st.warning(f"No data found for {drug_name}")
+            return None
     else:
-        st.error("Could not retrieve data from OpenFDA.")
+        st.error(f"Error {response.status_code}: Could not retrieve data from OpenFDA")
         return None
 
 # Function to extract relevant drug information
