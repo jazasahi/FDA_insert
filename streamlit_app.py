@@ -1,25 +1,23 @@
-import os
-import openai
-import requests
 import streamlit as st
+import requests
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, pipeline
 
-# Use Streamlit's secrets management to fetch the API key securely
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# Load the GPT-2 tokenizer and model
+tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+model = GPT2LMHeadModel.from_pretrained('gpt2')
 
-# Function to query the OpenFDA API for drug information based on the user's query
+# Hugging Face pipeline for text generation
+generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
+
+# Function to query the OpenFDA API for drug information
 def query_openfda(drug_name):
-    url = f"https://api.fda.gov/drug/label.json?search=openfda.brand_name:{drug_name}&limit=1"
-    response = requests.get(url)
-
+    base_url = 'https://api.fda.gov/drug/label.json'
+    params = {'search': f'openfda.brand_name:{drug_name}', 'limit': 1}
+    response = requests.get(base_url, params=params)
     if response.status_code == 200:
-        data = response.json()
-        if "results" in data:
-            return data["results"][0]  # Return the first result
-        else:
-            st.warning(f"No data found for {drug_name}")
-            return None
+        return response.json()
     else:
-        st.error(f"Error {response.status_code}: Could not retrieve data from OpenFDA")
+        st.error("Could not retrieve data from OpenFDA.")
         return None
 
 # Function to extract relevant drug information
@@ -31,7 +29,7 @@ def extract_relevant_info(drug_json):
         drug_info['Brand Name'] = drug_json['results'][0]['openfda']['brand_name'][0]
         drug_info['Generic Name'] = drug_json['results'][0]['openfda']['generic_name'][0]
         drug_info['Indications'] = drug_json['results'][0]['indications_and_usage'][0]
-        drug_info['Warnings'] = drug_json['results'][0]['boxed_warnings'][0]
+        drug_info['Warnings'] = drug_json['results'][0]['warnings'][0]
         drug_info['Dosage'] = drug_json['results'][0]['dosage_and_administration'][0]
         drug_info['Forms and strength'] = drug_json['results'][0]['dosage_forms_and_strengths'][0]
         drug_info['Contraindications'] = drug_json['results'][0]['contraindications'][0]
@@ -53,56 +51,58 @@ def extract_relevant_info(drug_json):
         st.warning(f"Some fields are missing: {e}")
     return drug_info
 
-# Function to generate response using GPT-3.5
-def generate_gpt3_response(prompt):
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # Use GPT-3.5 Turbo model
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,  # Limit the response length
-            temperature=0.7  # Adjust temperature for more controlled, factual output
-        )
-        return response['choices'][0]['message']['content']
-    except Exception as e:
-        st.error(f"Error generating response: {str(e)}")
-        return None
-
 # Streamlit UI
 st.title("Clinical Drug Information and Query Response Generator")
 
-# Input field for clinicians to ask a question, including drug name
-user_prompt = st.text_area("Enter your clinical question (include the drug name):", "")
+# Input field for clinicians to enter drug name
+drug_name = st.text_input("Enter the Drug Name:", "")
+
+# Input field for clinicians to ask a question
+user_prompt = st.text_area("Enter your clinical question:", "")
 
 if st.button("Search and Generate Response"):
-    # Extract the drug name from the user's query (assuming first word as drug name)
-    drug_name = user_prompt.split()[0]  # Assuming the drug name is the first word of the prompt
+    # Query the OpenFDA API and retrieve drug data
     fda_data = query_openfda(drug_name)
-
     if fda_data:
         # Extract drug information
         drug_info = extract_relevant_info(fda_data)
         st.write("Drug Information:")
         st.json(drug_info)
         
-        # Create the prompt based on user question and FDA data
+        # Generate a professional answer based on user input and FDA data
         prompt = f"""
-        You are a clinician looking for detailed, professional information about {drug_name}. 
-        Based on the following data, generate a relevant, professional and fact-based response:
+        You are a clinician who is looking for detailed, professional information about {drug_name}. 
+        Based on the following data, generate a professional, fact-based response:
         
         Drug Information:
         Brand Name: {drug_info.get('Brand Name', 'unknown')}
         Generic Name: {drug_info.get('Generic Name', 'unknown')}
         Indications: {drug_info.get('Indications', 'unknown')}
+        Warnings: {drug_info.get('Warnings', 'unknown')}
         Dosage: {drug_info.get('Dosage', 'unknown')}
+        Forms and strength: {drug_info.get('Forms and strength', 'unknown')}
+        Contraindications: {drug_info.get('Contraindications', 'unknown')}
+        Precautions: {drug_info.get('Precautions', 'unknown')}
+        Adverse Reactions: {drug_info.get('Adverse Reactions', 'unknown')}
+        Drug Interactions: {drug_info.get('Drug Interactions', 'unknown')}
+        Pregnancy: {drug_info.get('Pregnancy', 'unknown')}
+        Pediatric use: {drug_info.get('Pediatric use', 'unknown')}
+        Geriactric use: {drug_info.get('Geriactric use', 'unknown')}
+        Overdose: {drug_info.get('Overdose', 'unknown')}
+        Mechanism of action: {drug_info.get('Mechanism of action', 'unknown')}
+        Pharmacodynamics: {drug_info.get('Pharmacodynamics', 'unknown')}
+        Pharmacokinetics: {drug_info.get('Pharmacokinetics', 'unknown')}
+        Clinical Studies: {drug_info.get('Clinical Studies', 'unknown')}
+        How supplied: {drug_info.get('How supplied', 'unknown')}
+        Instructions for use: {drug_info.get('Instructions for use', 'unknown')}
+        NDC: {drug_info.get('NDC', 'unknown')}
         
         Question: {user_prompt}
         
-        Respond in a sarcastic tone and provide factual information.
-        #change the tone to your liking
+        Please respond in a professional tone and provide factual information.
         """
         
-        # Generate a response using GPT-3.5
-        generated_response = generate_gpt3_response(prompt)
-        if generated_response:
-            st.write("Generated Response:")
-            st.write(generated_response)
+        # Generate a response based on the user prompt and drug information
+        generated_response = generator(prompt, max_length=200, num_return_sequences=1)
+        st.write("Generated Response:")
+        st.write(generated_response[0]['generated_text'])
